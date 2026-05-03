@@ -71,6 +71,7 @@ read -srp "$(echo -e "${BOLD}PostgreSQL password${NC} (input hidden): ")" DB_PAS
 echo
 [[ -n "$DB_PASS" ]] || error "Database password is required."
 
+# Generate a random session secret if not provided
 SESSION_SECRET=$(openssl rand -hex 32)
 info "Generated random SESSION_SECRET (saved to .env)"
 
@@ -100,6 +101,43 @@ $SUDO apt-get install -y -qq \
   nginx postgresql postgresql-contrib openssl
 
 success "System packages installed"
+
+# ── Piper TTS ─────────────────────────────────────────────────
+step "Installing Piper TTS (local neural text-to-speech)"
+
+PIPER_DIR="/opt/piper"
+PIPER_BINARY="/usr/local/bin/piper"
+PIPER_MODEL_PATH="${PIPER_DIR}/en_US-lessac-medium.onnx"
+PIPER_VERSION="2023.11.14-2"
+
+if [[ -x "$PIPER_BINARY" && -f "$PIPER_MODEL_PATH" ]]; then
+  success "Piper TTS already installed"
+else
+  $SUDO mkdir -p "$PIPER_DIR"
+
+  # Download and extract piper binary
+  if [[ ! -x "$PIPER_BINARY" ]]; then
+    info "Downloading piper binary..."
+    TMP_PIPER="/tmp/piper_linux.tar.gz"
+    curl -fsSL \
+      "https://github.com/rhasspy/piper/releases/download/${PIPER_VERSION}/piper_linux_x86_64.tar.gz" \
+      -o "$TMP_PIPER"
+    $SUDO tar -xzf "$TMP_PIPER" -C "$PIPER_DIR" --strip-components=1
+    $SUDO ln -sf "${PIPER_DIR}/piper" "$PIPER_BINARY"
+    rm -f "$TMP_PIPER"
+    success "Piper binary installed at $PIPER_BINARY"
+  fi
+
+  # Download voice model (en_US-lessac-medium, ~63 MB)
+  if [[ ! -f "$PIPER_MODEL_PATH" ]]; then
+    info "Downloading en_US-lessac-medium voice model (~63 MB)..."
+    VOICE_BASE="https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium"
+    $SUDO curl -fsSL "${VOICE_BASE}/en_US-lessac-medium.onnx"      -o "$PIPER_MODEL_PATH"
+    $SUDO curl -fsSL "${VOICE_BASE}/en_US-lessac-medium.onnx.json" \
+      -o "${PIPER_MODEL_PATH}.json"
+    success "Voice model downloaded to $PIPER_MODEL_PATH"
+  fi
+fi
 
 # ── Node.js ───────────────────────────────────────────────────
 step "Installing Node.js 22 (LTS)"
@@ -159,6 +197,7 @@ if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" pull
 else
   $SUDO git clone "$REPO_URL" "$INSTALL_DIR"
+  # Make install dir owned by current user so we don't need sudo for pnpm
   if [[ "$EUID" -ne 0 ]]; then
     $SUDO chown -R "$USER:$USER" "$INSTALL_DIR"
   fi
@@ -175,7 +214,11 @@ cat > "$ENV_FILE" <<EOF
 NODE_ENV=production
 DATABASE_URL=${DATABASE_URL}
 SESSION_SECRET=${SESSION_SECRET}
+
+# API server port — nginx proxies /api here
 PORT=${API_PORT}
+
+# Frontend build vars (used at build time only)
 BASE_PATH=/
 EOF
 
@@ -202,6 +245,7 @@ success "Database schema up to date"
 step "Building frontend (React + Vite)"
 
 cd "$INSTALL_DIR"
+# PORT is required by vite.config.ts validation but not used during `build`
 PORT=1 BASE_PATH=/ NODE_ENV=production \
   pnpm --filter @workspace/terminal-ai run build
 
@@ -236,6 +280,8 @@ module.exports = {
         PORT: "${API_PORT}",
         DATABASE_URL: "${DATABASE_URL}",
         SESSION_SECRET: "${SESSION_SECRET}",
+        PIPER_BINARY: "${PIPER_BINARY}",
+        PIPER_MODEL: "${PIPER_MODEL_PATH}",
       },
       max_memory_restart: "512M",
       restart_delay: 3000,
@@ -245,6 +291,7 @@ module.exports = {
 };
 EOF
 
+# Start or reload
 if pm2 list | grep -q "terminal-ai-api"; then
   pm2 reload "$PM2_CONFIG" --update-env
 else
@@ -252,6 +299,7 @@ else
 fi
 
 pm2 save
+# Set PM2 to start on boot
 pm2 startup | tail -1 | $SUDO bash || warn "Run the 'pm2 startup' command shown above manually to enable auto-start."
 
 success "PM2 running. Check with: pm2 status"
@@ -266,31 +314,43 @@ server {
     listen 80;
     server_name ${DOMAIN};
 
+    # ── Static frontend ──────────────────────────────────────
     root ${FRONTEND_DIST};
     index index.html;
 
+    # ── API + WebSocket proxy ────────────────────────────────
     location /api/ {
         proxy_pass http://127.0.0.1:${API_PORT};
         proxy_http_version 1.1;
+
+        # WebSocket upgrade (SSH terminal)
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
+
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # Longer timeouts for SSH sessions
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+
+        # Disable buffering for streaming responses
         proxy_buffering off;
     }
 
+    # ── SPA fallback (React Router) ──────────────────────────
     location / {
         try_files \$uri \$uri/ /index.html;
     }
 
+    # ── Security headers ─────────────────────────────────────
     add_header X-Frame-Options SAMEORIGIN;
     add_header X-Content-Type-Options nosniff;
     add_header Referrer-Policy strict-origin-when-cross-origin;
 
+    # ── Gzip ─────────────────────────────────────────────────
     gzip on;
     gzip_types text/plain text/css application/json application/javascript
                text/xml application/xml application/xml+rss text/javascript
@@ -327,22 +387,30 @@ fi
 # ── Update script ─────────────────────────────────────────────
 cat > "$INSTALL_DIR/update.sh" <<'UPDATEEOF'
 #!/usr/bin/env bash
+# Run this script to pull the latest code and redeploy.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$DIR"
+
 echo "→ Pulling latest code..."
 git pull
+
 echo "→ Installing dependencies..."
 pnpm install --frozen-lockfile
+
 echo "→ Running migrations..."
 source "$DIR/.env"
 DATABASE_URL="$DATABASE_URL" pnpm --filter @workspace/db run push
+
 echo "→ Building frontend..."
 PORT=1 BASE_PATH=/ NODE_ENV=production pnpm --filter @workspace/terminal-ai run build
+
 echo "→ Building API server..."
 pnpm --filter @workspace/api-server run build
+
 echo "→ Reloading PM2..."
 pm2 reload ecosystem.config.cjs --update-env
+
 echo "✓ Update complete"
 UPDATEEOF
 chmod +x "$INSTALL_DIR/update.sh"
