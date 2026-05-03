@@ -1,0 +1,488 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Terminal AI API specification
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: ssh-connections
+    description: SSH server connections management
+  - name: snippets
+    description: Command snippets management
+  - name: ai-settings
+    description: AI provider settings
+  - name: chat
+    description: AI chat operations
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      description: Returns server health status
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  /ssh-connections:
+    get:
+      operationId: listSshConnections
+      tags: [ssh-connections]
+      summary: List all SSH connections
+      responses:
+        "200":
+          description: List of SSH connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SshConnection"
+    post:
+      operationId: createSshConnection
+      tags: [ssh-connections]
+      summary: Create a new SSH connection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSshConnectionBody"
+      responses:
+        "201":
+          description: Created SSH connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshConnection"
+
+  /ssh-connections/{id}:
+    get:
+      operationId: getSshConnection
+      tags: [ssh-connections]
+      summary: Get a single SSH connection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSH connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshConnection"
+        "404":
+          description: Not found
+    put:
+      operationId: updateSshConnection
+      tags: [ssh-connections]
+      summary: Update an SSH connection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSshConnectionBody"
+      responses:
+        "200":
+          description: Updated SSH connection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SshConnection"
+    delete:
+      operationId: deleteSshConnection
+      tags: [ssh-connections]
+      summary: Delete an SSH connection
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /snippets:
+    get:
+      operationId: listSnippets
+      tags: [snippets]
+      summary: List all command snippets
+      responses:
+        "200":
+          description: List of command snippets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Snippet"
+    post:
+      operationId: createSnippet
+      tags: [snippets]
+      summary: Create a new command snippet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSnippetBody"
+      responses:
+        "201":
+          description: Created snippet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snippet"
+
+  /snippets/{id}:
+    put:
+      operationId: updateSnippet
+      tags: [snippets]
+      summary: Update a command snippet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSnippetBody"
+      responses:
+        "200":
+          description: Updated snippet
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Snippet"
+    delete:
+      operationId: deleteSnippet
+      tags: [snippets]
+      summary: Delete a command snippet
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /ai-settings:
+    get:
+      operationId: getAiSettings
+      tags: [ai-settings]
+      summary: Get AI provider settings
+      responses:
+        "200":
+          description: AI settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSettings"
+    put:
+      operationId: updateAiSettings
+      tags: [ai-settings]
+      summary: Update AI provider settings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAiSettingsBody"
+      responses:
+        "200":
+          description: Updated AI settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiSettings"
+
+  /chat:
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Send a message to the AI with optional terminal context
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendChatMessageBody"
+      responses:
+        "200":
+          description: AI response
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatResponse"
+
+  /chat/history:
+    get:
+      operationId: getChatHistory
+      tags: [chat]
+      summary: Get recent chat history
+      responses:
+        "200":
+          description: List of chat messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+    delete:
+      operationId: clearChatHistory
+      tags: [chat]
+      summary: Clear all chat history (saves session to GitHub if configured)
+      responses:
+        "204":
+          description: Cleared
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    SshConnection:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+        username:
+          type: string
+        authType:
+          type: string
+          enum: [password, key]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - host
+        - port
+        - username
+        - authType
+        - createdAt
+        - updatedAt
+
+    CreateSshConnectionBody:
+      type: object
+      properties:
+        name:
+          type: string
+        host:
+          type: string
+        port:
+          type: integer
+          default: 22
+        username:
+          type: string
+        authType:
+          type: string
+          enum: [password, key]
+        password:
+          type: string
+        privateKey:
+          type: string
+        passphrase:
+          type: string
+      required:
+        - name
+        - host
+        - port
+        - username
+        - authType
+
+    Snippet:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        command:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - command
+        - createdAt
+
+    CreateSnippetBody:
+      type: object
+      properties:
+        title:
+          type: string
+        command:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+      required:
+        - title
+        - command
+
+    AiSettings:
+      type: object
+      properties:
+        id:
+          type: integer
+        apiKey:
+          type: string
+          description: Masked API key (only last 4 chars shown)
+        endpointUrl:
+          type: string
+        modelName:
+          type: string
+        hasApiKey:
+          type: boolean
+        systemPrompt:
+          type: string
+        hasGithubToken:
+          type: boolean
+          description: Whether a GitHub personal access token is stored
+        githubRepo:
+          type: string
+          description: GitHub repo in owner/repo format
+      required:
+        - id
+        - endpointUrl
+        - modelName
+        - hasApiKey
+        - hasGithubToken
+
+    UpdateAiSettingsBody:
+      type: object
+      properties:
+        apiKey:
+          type: string
+        endpointUrl:
+          type: string
+        modelName:
+          type: string
+        systemPrompt:
+          type: string
+        githubToken:
+          type: string
+          description: GitHub personal access token (leave blank to keep current)
+        githubRepo:
+          type: string
+          description: GitHub repo in owner/repo format (e.g. myuser/ai-memory)
+
+    SendChatMessageBody:
+      type: object
+      properties:
+        message:
+          type: string
+        terminalContext:
+          type: string
+          description: Recent terminal output for AI context
+        agentMode:
+          type: boolean
+          description: Whether this message is part of an autonomous agent loop
+        agentTask:
+          type: string
+          description: The original task assigned to the agent (for context)
+        agentStep:
+          type: integer
+          description: Current step number in the agent loop
+        forceMemory:
+          type: boolean
+          description: If true, always save this user message to the memory file
+      required:
+        - message
+
+    ChatResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        command:
+          type: string
+          description: Command the AI wants to execute (if any)
+        done:
+          type: boolean
+          description: Agent signals task is complete (agent mode only)
+        role:
+          type: string
+          enum: [assistant]
+        memorySaved:
+          type: boolean
+          description: Whether the AI wrote something to memory this turn
+        synced:
+          type: boolean
+          description: Whether this turn triggered a GitHub sync
+      required:
+        - message
+        - role
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+        command:
+          type: string
+        terminalContext:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - role
+        - content
+        - createdAt
