@@ -6,6 +6,7 @@ import aiSettingsRouter from "./ai-settings";
 import chatRouter from "./chat";
 import sftpRouter from "./sftp";
 import memoryRouter from "./memory";
+import ttsRouter from "./tts";
 
 const router: IRouter = Router();
 
@@ -16,5 +17,6 @@ router.use(aiSettingsRouter);
 router.use(chatRouter);
 router.use(sftpRouter);
 router.use(memoryRouter);
+router.use(ttsRouter);
 
 export default router;
